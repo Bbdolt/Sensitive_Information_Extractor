@@ -335,6 +335,11 @@ def on_extract_click():
 def clear_output():
     global js_data
     js_data = []
+    global result_list
+    result_list = []
+    current_status.set("ALL")
+    domain_combobox['values'] = "ALL"
+    domain_combobox.set(current_status.get())
     output_box.config(state=tk.NORMAL)  # 允许编辑
     output_box.delete("1.0", tk.END)   # 清空内容
     output_box.config(state=tk.DISABLED)  # 禁用编辑
