@@ -8,6 +8,10 @@ import socketserver
 import base64
 from socketserver import ThreadingMixIn
 
+# 当前的下拉框选择项
+current_status = None
+# 记录所有匹配项
+result_list = []
 # 新增：HTTP 服务相关
 server_running = False
 httpd = None
@@ -143,22 +147,22 @@ rules = [
         "Rule": "(javax\\.faces\\.ViewState)",
         "VerboseName": "Java 反序列化"
     },
-    {
-        "Rule": "((access=)|(adm=)|(admin=)|(alter=)|(cfg=)|(clone=)|(config=)|(create=)|(dbg=)|(debug=)|(delete=)|(disable=)|(edit=)|(enable=)|(exec=)|(execute=)|(grant=)|(load=)|(make=)|(modify=)|(rename=)|(reset=)|(root=)|(shell=)|(test=)|(toggl=))",
-        "VerboseName": "调试逻辑参数"
-    },
-    {
-        "Rule": "(=(https?)(://|%3a%2f%2f))",
-        "VerboseName": "URL 作为值"
-    },
-    {
-        "Rule": "(type\\=\\\"file\\\")",
-        "VerboseName": "上传表单"
-    },
-    {
-        "Rule": "((size=)|(page=)|(num=)|(limit=)|(start=)|(end=)|(count=))",
-        "VerboseName": "DoS 参数"
-    },
+    # {
+    #     "Rule": "((access=)|(adm=)|(admin=)|(alter=)|(cfg=)|(clone=)|(config=)|(create=)|(dbg=)|(debug=)|(delete=)|(disable=)|(edit=)|(enable=)|(exec=)|(execute=)|(grant=)|(load=)|(make=)|(modify=)|(rename=)|(reset=)|(root=)|(shell=)|(test=)|(toggl=))",
+    #     "VerboseName": "调试逻辑参数"
+    # },
+    # {
+    #     "Rule": "(=(https?)(://|%3a%2f%2f))",
+    #     "VerboseName": "URL 作为值"
+    # },
+    # {
+    #     "Rule": "(type\\=\\\"file\\\")",
+    #     "VerboseName": "上传表单"
+    # },
+    # {
+    #     "Rule": "((size=)|(page=)|(num=)|(limit=)|(start=)|(end=)|(count=))",
+    #     "VerboseName": "DoS 参数"
+    # },
     {
         "Rule": "(([a-z0-9]+[_|\\.])*[a-z0-9]+@([a-z0-9]+[-|_|\\.])*[a-z0-9]+\\.((?!js|css|jpg|jpeg|png|ico)[a-z]{2,5}))",
         "VerboseName": "电子邮件"
@@ -191,10 +195,10 @@ rules = [
         "Rule": "(((|\\\\)(|'|\")(|[\\.\\w]{1,10})([p](ass|wd|asswd|assword))(|[\\.\\w]{1,10})(|\\\\)(|'|\")( |)(:|[=]{1,3}|![=]{1,2}|[\\)]{0,1}\\.val\\()( |)(|\\\\)('|\")([^'\"]+?)(|\\\\)('|\")(|,|\\)))|((|\\\\)('|\")([^'\"]+?)(|\\\\)('|\")(|\\\\)(|'|\")( |)(:|[=]{1,3}|![=]{1,2})( |)(|[\\.\\w]{1,10})([p](ass|wd|asswd|assword))(|[\\.\\w]{1,10})(|\\\\)(|'|\")))",
         "VerboseName": "密码字段"
     },
-    {
-        "Rule": "(((|\\\\)(|'|\")(|[\\.\\w]{1,10})(([u](ser|name|sername))|(account)|((((create|update)((d|r)|(by|on|at)))|(creator))))(|[\\.\\w]{1,10})(|\\\\)(|'|\")( |)(:|=|!=|[\\)]{0,1}\\.val\\()( |)(|\\\\)('|\")([^'\"]+?)(|\\\\)('|\")(|,|\\)))|((|\\\\)('|\")([^'\"]+?)(|\\\\)('|\")(|\\\\)(|'|\")( |)(:|[=]{1,3}|![=]{1,2})( |)(|[\\.\\w]{1,10})(([u](ser|name|sername))|(account)|((((create|update)((d|r)|(by|on|at)))|(creator))))(|[\\.\\w]{1,10})(|\\\\)(|'|\")))",
-        "VerboseName": "用户名字段"
-    },
+    # {
+    #     "Rule": "(((|\\\\)(|'|\")(|[\\.\\w]{1,10})(([u](ser|name|sername))|(account)|((((create|update)((d|r)|(by|on|at)))|(creator))))(|[\\.\\w]{1,10})(|\\\\)(|'|\")( |)(:|=|!=|[\\)]{0,1}\\.val\\()( |)(|\\\\)('|\")([^'\"]+?)(|\\\\)('|\")(|,|\\)))|((|\\\\)('|\")([^'\"]+?)(|\\\\)('|\")(|\\\\)(|'|\")( |)(:|[=]{1,3}|![=]{1,2})( |)(|[\\.\\w]{1,10})(([u](ser|name|sername))|(account)|((((create|update)((d|r)|(by|on|at)))|(creator))))(|[\\.\\w]{1,10})(|\\\\)(|'|\")))",
+    #     "VerboseName": "用户名字段"
+    # },
     {
         "Rule": "((corp)(id|secret))",
         "VerboseName": "企业微信密钥"
@@ -214,11 +218,12 @@ rules = [
     {
         "Rule": "(((|\\\\)(|'|\")(|[\\w]{1,10})(mobile|phone|sjh|shoujihao|concat)(|[\\.\\w]{1,10})(|\\\\)(|'|\")( |)(:|=|!=|[\\)]{0,1}\\.val\\()( |)(|\\\\)('|\")([^'\"]+?)(|\\\\)('|\")(|,|\\)))|((|\\\\)('|\")([^'\"]+?)(|\\\\)('|\")(|\\\\)(|'|\")( |)(:|[=]{1,3}|![=]{1,2})( |)(|[\\.\\w]{1,10})(mobile|phone|sjh|shoujihao|concat)(|[\\.\\w]{1,10})(|\\\\)(|'|\"))) ",
         "VerboseName": "手机号字段"
-    },
-    {
-        "Rule": "(?:\"|')((?:(?:[a-zA-Z]{1,10}://|//)[^\"'/]{1,}\\.[a-zA-Z]{2,}[^\"']{0,}))(?:(?:\"|')|\\s|$)",
-        "VerboseName": "URL 字段"
     }
+    # ,
+    # {
+    #     "Rule": "(?:\"|')((?:(?:[a-zA-Z]{1,10}://|//)[^\"'/]{1,}\\.[a-zA-Z]{2,}[^\"']{0,}))(?:(?:\"|')|\\s|$)",
+    #     "VerboseName": "URL 字段"
+    # }
 ]
 
 def match_rules(text):
@@ -252,7 +257,7 @@ def extract_thread(url="", body=""):
     results = []
     if url=="" and body=="":
         for text, rule_name in matched:
-            results.append(f"{text}  ({rule_name})")
+            results.append(f"{text}  ({rule_name})  无url")
     else:
         for text, rule_name in matched:
             results.append(f"{text}  ({rule_name})  {url}")
@@ -275,6 +280,7 @@ def get_tag_by_line(line):
         return None
 
 def update_output():
+    global result_list
     output_box.config(state=tk.NORMAL)
 
     existing_content = output_box.get("1.0", tk.END).strip().splitlines()
@@ -284,23 +290,43 @@ def update_output():
         combined_results += result_queue.get()
 
     # 去重、去空、去除 '无匹配'
-    unique_results = list(dict.fromkeys(filter(lambda x: x and x != '无匹配', combined_results)))
+    result_list += list(dict.fromkeys(filter(lambda x: x and x != '无匹配', combined_results)))
+    result_list = list(set(result_list))
 
     output_box.delete("1.0", tk.END)
-    if unique_results:
-        for line in unique_results:
+    if result_list and current_status.get() == "ALL":
+        for line in result_list:
             tag = get_tag_by_line(line)
             if tag:
                 output_box.insert(tk.END, line + "\n\n", tag)
             else:
                 output_box.insert(tk.END, line + "\n\n")
+    elif result_list and current_status.get() != "ALL":
+        for line in result_list:
+            if current_status.get() in line:
+                tag = get_tag_by_line(line)
+                if tag:
+                    output_box.insert(tk.END, line + "\n\n", tag)
+                else:
+                    output_box.insert(tk.END, line + "\n\n")
     else:
         output_box.insert(tk.END, "无匹配\n", "gray_tag")
 
+    refresh_domains()
     output_box.config(state=tk.DISABLED)
     extract_button.config(state=tk.NORMAL, text="提取")
 
-
+def refresh_domains():
+    domains = set()
+    for line in result_list:
+        parts = line.split("  ")
+        domain = parts[2].replace("https://", "").replace("http://", "")
+        domain = domain.split("/")[0]
+        domains.add(domain)
+    domain_list = sorted(list(domains))
+    domain_list.insert(0, "ALL")  # 插到最前面
+    domain_combobox['values'] = domain_list
+    domain_combobox.set(current_status.get())
 
 def on_extract_click():
     threading.Thread(target=extract_thread).start()
@@ -326,6 +352,7 @@ try:
 except Exception as e:
     print("未找到icon.ico，忽略图标设置。")
 
+current_status = tk.StringVar(value="ALL")
 
 style = ttk.Style()
 style.theme_use('default')
@@ -354,6 +381,13 @@ main_frame.rowconfigure(0, weight=1)
 # 输入框
 input_box = tk.Text(main_frame, wrap=tk.WORD, font=("Arial", 12))
 input_box.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+
+# 下拉框
+domain_combobox = ttk.Combobox(main_frame, textvariable=current_status, state="readonly", font=("Arial", 12))
+domain_combobox.grid(row=0, column=1, padx=5, pady=(0, 5), sticky="n")
+domain_combobox['values'] = ["ALL"]
+domain_combobox.set("ALL")
+domain_combobox.bind("<<ComboboxSelected>>", lambda event: update_output())
 
 # 提取按钮
 extract_button = ttk.Button(main_frame, text="提取", 
