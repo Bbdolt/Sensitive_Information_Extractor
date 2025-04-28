@@ -84,6 +84,9 @@ mirrorHTTPFlow = func(isHttps /*bool*/, url /*string*/, req /*[]byte*/, rsp /*[]
 ![image](https://github.com/user-attachments/assets/b2198aa8-0f3f-4ec7-8c35-70767bf62008)
 ![image](https://github.com/user-attachments/assets/8c747dac-ff7a-424b-8be0-9ef6034ac889)
 
+#### v1.0.1 增加了下拉框筛选 domain 的功能
+![image](https://github.com/user-attachments/assets/f46f8759-904c-42e8-a994-923e06dbba50)
+
 
 
 
