@@ -2,7 +2,118 @@ import tkinter as tk
 from tkinter import ttk
 import threading
 import re
+import json
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import socketserver
+import base64
+from socketserver import ThreadingMixIn
 
+# 新增：HTTP 服务相关
+server_running = False
+httpd = None
+js_data = []
+class RequestHandler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        content_length = int(self.headers.get('Content-Length', 0))
+        body = self.rfile.read(content_length)
+        
+        # 先快速响应
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"OK")
+        data = json.loads(body)
+        url = data.get('url', '')
+        url = base64.b64decode(url).decode('utf-8')
+        print("url:", url)
+        if url in js_data:
+            return
+        if '.js' in url:
+            js_data.append(url)
+        # 后台处理
+        try:
+            data = json.loads(body)
+            url = data.get('url', '')
+            body_text = data.get('body', '')
+            url = base64.b64decode(url).decode('utf-8')
+            body_text = base64.b64decode(body_text).decode('utf-8')
+            print("url:", url)
+            threading.Thread(target=extract_thread, args=(url, body_text)).start()
+        except Exception as e:
+            pass
+    # 覆盖log_message方法，阻止日志输出
+    def log_message(self, format, *args):
+        pass
+
+
+class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
+    daemon_threads = True  # 子线程异常时不会影响主线程
+
+def start_http_server():
+    global httpd
+    server_address = ('127.0.0.1', 9015)
+    httpd = ThreadingHTTPServer(server_address, RequestHandler)
+    httpd.serve_forever()
+
+def toggle_server():
+    global server_running, httpd, server_thread
+    if not server_running:
+        server_thread = threading.Thread(target=start_http_server, daemon=True)
+        server_thread.start()
+        server_running = True
+        server_button.config(text="关闭劫持", style="Stop.TButton")  # 变红
+    else:
+        if httpd:
+            httpd.shutdown()
+            httpd.server_close()
+            httpd = None
+        server_running = False
+        server_button.config(text="开始劫持", style="Start.TButton")  # 变绿
+
+# 规则匹配颜色
+# 高危 红色
+first_keywords = [
+    "Swagger UI",
+    "云密钥",
+    "密码字段",
+    "敏感字段",
+    "企业微信密钥",
+    "中国身份证号",
+    "中国手机号",
+    "手机号字段"
+]
+
+# 中危 橙色
+second_keywords = [
+    "Shiro Cookie",
+    "JSON Web Token (JWT)",
+    "Druid",
+    "Windows 文件/目录路径",
+    "JDBC连接",
+    "URL 作为值",
+    "授权头",
+    "用户名字段"
+]
+
+# 低危 绿色
+third_keywords = [
+    "Ueditor",
+    "PDF.js 查看器",
+    "Java 反序列化",
+    "URL 字段",
+    "内网IP地址",
+    "MAC地址",
+    "上传表单"
+]
+
+# 信息 无色
+info_keywords = [
+    "电子邮件",
+    "调试逻辑参数",
+    "DoS 参数"
+]
+
+
+# 规则如下
 rules = [
     {
         "Rule": "(=deleteMe|rememberMe=)",
@@ -125,42 +236,96 @@ def match_rules(text):
             errors.append(f"规则错误: {rule_name} ({e})")
     return matched_data, errors
 
-def extract_thread():
+import queue
+
+result_queue = queue.Queue()
+
+def extract_thread(url="", body=""):
     extract_button.config(state=tk.DISABLED, text="提取中...")
     input_text = input_box.get("1.0", tk.END)
-    matched, errors = match_rules(input_text)
-
-    def update_output():
-        output_box.config(state=tk.NORMAL)
-        output_box.delete("1.0", tk.END)
-        
-        results = []
-        # 添加匹配结果
+    if url=="" and body=="":
+        matched, errors = match_rules(input_text)
+    else:
+        matched,errors = match_rules(body)
+    
+    # 整理结果
+    results = []
+    if url=="" and body=="":
         for text, rule_name in matched:
-            results.append(f"{text}     ( {rule_name})")
-        
-        # 添加错误信息
-        results.extend(errors)
-        
-        if results:
-            output_box.insert(tk.END, "\n".join(results))
-        else:
-            output_box.insert(tk.END, "无匹配")
-        
-        output_box.config(state=tk.DISABLED)
-        extract_button.config(state=tk.NORMAL, text="提取")
+            results.append(f"{text}  ({rule_name})")
+    else:
+        for text, rule_name in matched:
+            results.append(f"{text}  ({rule_name})  {url}")
+    results.extend(errors)
 
+    # 把结果推到队列里
+    result_queue.put(results)
+
+    # 触发主线程更新
     root.after(0, update_output)
+
+def get_tag_by_line(line):
+    if any(keyword in line for keyword in first_keywords):
+        return "red_tag"
+    elif any(keyword in line for keyword in second_keywords):
+        return "orange_tag"
+    elif any(keyword in line for keyword in third_keywords):
+        return "green_tag"
+    else:
+        return None
+
+def update_output():
+    output_box.config(state=tk.NORMAL)
+
+    existing_content = output_box.get("1.0", tk.END).strip().splitlines()
+    combined_results = existing_content.copy()
+
+    while not result_queue.empty():
+        combined_results += result_queue.get()
+
+    # 去重、去空、去除 '无匹配'
+    unique_results = list(dict.fromkeys(filter(lambda x: x and x != '无匹配', combined_results)))
+
+    output_box.delete("1.0", tk.END)
+    if unique_results:
+        for line in unique_results:
+            tag = get_tag_by_line(line)
+            if tag:
+                output_box.insert(tk.END, line + "\n\n", tag)
+            else:
+                output_box.insert(tk.END, line + "\n\n")
+    else:
+        output_box.insert(tk.END, "无匹配\n", "gray_tag")
+
+    output_box.config(state=tk.DISABLED)
+    extract_button.config(state=tk.NORMAL, text="提取")
+
+
 
 def on_extract_click():
     threading.Thread(target=extract_thread).start()
+
+# 添加清空结果按钮
+def clear_output():
+    global js_data
+    js_data = []
+    output_box.config(state=tk.NORMAL)  # 允许编辑
+    output_box.delete("1.0", tk.END)   # 清空内容
+    output_box.config(state=tk.DISABLED)  # 禁用编辑
+
+import tkinter as tk
+from tkinter import ttk
 
 # GUI 界面
 root = tk.Tk()
 root.title("敏感信息提取器_ByBbdolt")
 root.geometry("1000x600")
-root.minsize(800, 500)
-root.wm_iconbitmap("icon.ico")
+root.minsize(1152, 720)
+try:
+    root.iconbitmap("icon.ico")
+except Exception as e:
+    print("未找到icon.ico，忽略图标设置。")
+
 
 style = ttk.Style()
 style.theme_use('default')
@@ -168,24 +333,64 @@ style.configure("TButton", font=("Arial", 12), padding=6,
                 background="#4CAF50", foreground="white")
 style.map("TButton", foreground=[('disabled', '#aaaaaa')],
           background=[('disabled', '#cccccc')])
+style.configure("Start.TButton", font=("Arial", 12), padding=6, 
+                background="#4CAF50", foreground="white")
+style.map("Start.TButton", foreground=[('disabled', '#aaaaaa')],
+          background=[('disabled', '#cccccc')])
+
+style.configure("Stop.TButton", font=("Arial", 12), padding=6, 
+                background="#f44336", foreground="white")  # 红色
+style.map("Stop.TButton", foreground=[('disabled', '#aaaaaa')],
+          background=[('disabled', '#cccccc')])
 
 main_frame = ttk.Frame(root, padding=10)
 main_frame.pack(fill=tk.BOTH, expand=True)
 
-main_frame.columnconfigure(0, weight=3)
+main_frame.columnconfigure(0, weight=5)
 main_frame.columnconfigure(1, weight=0)
-main_frame.columnconfigure(2, weight=3)
+main_frame.columnconfigure(2, weight=2)
 main_frame.rowconfigure(0, weight=1)
 
+# 输入框
 input_box = tk.Text(main_frame, wrap=tk.WORD, font=("Arial", 12))
 input_box.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
 
+# 提取按钮
 extract_button = ttk.Button(main_frame, text="提取", 
                            command=on_extract_click, style="TButton")
 extract_button.grid(row=0, column=1, padx=5, pady=5)
 
-output_box = tk.Text(main_frame, wrap=tk.WORD, font=("Arial", 12), 
-                    state=tk.DISABLED)
-output_box.grid(row=0, column=2, sticky="nsew", padx=(10, 0))
+# 右边加一个Frame，用来放输出框和滚动条
+output_frame = ttk.Frame(main_frame)
+output_frame.grid(row=0, column=2, sticky="nsew", padx=(10, 0))
+
+output_frame.rowconfigure(0, weight=1)
+output_frame.columnconfigure(0, weight=1)
+
+# 输出框
+output_box = tk.Text(output_frame, wrap=tk.WORD, font=("Arial", 12), 
+                     state=tk.DISABLED)
+output_box.grid(row=0, column=0, sticky="nsew")
+
+# 输出框的滚动条
+output_scrollbar = ttk.Scrollbar(output_frame, orient=tk.VERTICAL, command=output_box.yview)
+output_scrollbar.grid(row=0, column=1, sticky="ns")
+
+output_box.config(yscrollcommand=output_scrollbar.set)
+output_box.tag_configure("red_tag", foreground="red")
+output_box.tag_configure("orange_tag", foreground="orange")
+output_box.tag_configure("green_tag", foreground="green")
+output_box.tag_configure("gray_tag", foreground="gray")
+
+
+# 劫持按钮
+server_button = ttk.Button(main_frame, text="开始劫持", 
+                           command=toggle_server, style="Start.TButton")
+server_button.grid(row=1, column=0, padx=5, pady=5, sticky="w")
+
+# 清空按钮
+clear_button = ttk.Button(main_frame, text="清空结果", 
+                          command=clear_output, style="TButton")
+clear_button.grid(row=1, column=2, padx=5, pady=5, sticky="e")  # 放在第二行，右侧
 
 root.mainloop()
